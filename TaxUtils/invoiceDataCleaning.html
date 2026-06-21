@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>发票清洗与智能分析 · 商品别名/单位统一/时间统计</title>
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Roboto, system-ui, sans-serif;
+            background: #f0f4f8;
+            margin: 0;
+            padding: 24px;
+        }
+        .app-container {
+            max-width: 1600px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 28px;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.05);
+            overflow: hidden;
+        }
+        .tabs {
+            display: flex;
+            background: #fff;
+            border-bottom: 1px solid #e2e8f0;
+            padding: 0 24px;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .tab-btn {
+            padding: 14px 20px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            background: none;
+            border: none;
+            cursor: pointer;
+            color: #475569;
+            border-bottom: 3px solid transparent;
+            transition: 0.2s;
+        }
+        .tab-btn.active {
+            color: #2c7da0;
+            border-bottom-color: #2c7da0;
+        }
+        .panel {
+            display: none;
+            padding: 24px 28px;
+        }
+        .panel.active { display: block; }
+        .toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-bottom: 20px;
+            align-items: center;
+        }
+        button {
+            background: #2c7da0;
+            border: none;
+            color: white;
+            padding: 8px 20px;
+            border-radius: 40px;
+            font-weight: 500;
+            cursor: pointer;
+            font-size: 0.85rem;
+        }
+        button.secondary {
+            background: #e2e8f0;
+            color: #1e293b;
+        }
+        button.danger { background: #dc2626; }
+        .rule-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+            margin-top: 12px;
+        }
+        .rule-table th, .rule-table td {
+            border: 1px solid #cbd5e1;
+            padding: 8px 10px;
+            vertical-align: top;
+        }
+        .rule-table th { background: #f8fafc; }
+        input, select {
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            padding: 6px 10px;
+            width: 100%;
+        }
+        .status-card {
+            background: #e6f7ff;
+            border-left: 4px solid #2c7da0;
+            padding: 12px 16px;
+            border-radius: 16px;
+            margin-bottom: 20px;
+        }
+        .flex-between {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        .preview-area {
+            max-height: 450px;
+            overflow: auto;
+            border: 1px solid #e2e8f0;
+            border-radius: 16px;
+            margin-top: 16px;
+        }
+        .preview-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.75rem;
+        }
+        .preview-table th, .preview-table td {
+            border: 1px solid #e2e8f0;
+            padding: 6px 8px;
+            white-space: nowrap;
+        }
+        .badge {
+            background: #f1f5f9;
+            padding: 2px 8px;
+            border-radius: 20px;
+            font-size: 0.7rem;
+        }
+        .insight-card {
+            background: #fef9e6;
+            border-left: 4px solid #e67e22;
+            margin-top: 20px;
+            padding: 12px 16px;
+            border-radius: 16px;
+        }
+        footer {
+            text-align: center;
+            font-size: 0.7rem;
+            color: #64748b;
+            padding: 16px;
+            border-top: 1px solid #e2e8f0;
+        }
+    </style>
+</head>
+<body>
+<div class="app-container">
+    <div class="tabs">
+        <button class="tab-btn active" data-tab="upload">📂 1. 上传&映射</button>
+        <button class="tab-btn" data-tab="alias">🏷️ 2. 商品别名映射</button>
+        <button class="tab-btn" data-tab="global">📖 3. 全局单位词典</button>
+        <button class="tab-btn" data-tab="product">📦 4. 产品单位特例</button>
+        <button class="tab-btn" data-tab="clean">✨ 5. 清洗 & 分析</button>
+    </div>
+
+    <!-- 面板1：上传&列映射 -->
+    <div id="uploadPanel" class="panel active">
+        <div class="status-card">💡 上传发票Excel/CSV，指定商品名称、数量、单位、金额、日期等列。工具将首先根据别名映射标准化商品名称，再进行单位统一和单价重算。</div>
+        <div class="toolbar">
+            <input type="file" id="fileInput" accept=".xlsx, .xls, .csv">
+            <button id="loadFileBtn">📂 加载文件</button>
+        </div>
+        <div id="columnMappingArea" style="margin-top:20px">
+            <h3>列映射</h3>
+            <div style="display: flex; flex-wrap: wrap; gap: 20px; margin-bottom: 16px;">
+                <div><label>商品名称列</label><select id="colProduct"></select></div>
+                <div><label>数量列</label><select id="colQty"></select></div>
+                <div><label>单位列</label><select id="colUnit"></select></div>
+                <div><label>金额列（不含税）</label><select id="colAmount"></select></div>
+                <div><label>开票日期列（用于时间统计）</label><select id="colDate"><option value="-1">(请选择)</option></select></div>
+                <div><label>原始单价列（可选）</label><select id="colPrice"><option value="-1">(无)</option></select></div>
+            </div>
+            <button id="applyMappingBtn">✅ 应用映射并保存</button>
+        </div>
+        <div id="fileInfo" class="status-card" style="display:none;"></div>
+    </div>
+
+    <!-- 面板2：商品别名映射 -->
+    <div id="aliasPanel" class="panel">
+        <div class="flex-between"><h3>商品别名映射（将多种写法统一为标准商品名）</h3><button id="addAliasBtn">➕ 新增别名</button></div>
+        <table class="rule-table" id="aliasTable">
+            <thead><th>原始商品名（别名）</th><th>标准商品名</th><th>操作</th></thead>
+            <tbody id="aliasTbody"></tbody>
+        </table>
+        <div class="toolbar"><button id="importAliasBtn" class="secondary">📥 导入别名规则(JSON)</button><button id="exportAliasBtn" class="secondary">📤 导出别名规则</button></div>
+        <div class="status-card">💡 示例：将“苹果手机”、“iPhone”都映射为标准名“智能手机”；清洗时自动替换。</div>
+    </div>
+
+    <!-- 面板3：全局单位词典 -->
+    <div id="globalPanel" class="panel">
+        <div class="flex-between"><h3>全局单位词典（正则匹配）</h3><button id="addGlobalRuleBtn">➕ 新增规则</button></div>
+        <table class="rule-table" id="globalTable"><thead><th>原始单位(正则)</th><th>标准单位</th><th>换算系数</th><th>操作</th></thead><tbody id="globalTbody"></tbody></table>
+        <div class="toolbar"><button id="importGlobalBtn" class="secondary">📥 导入JSON</button><button id="exportGlobalBtn" class="secondary">📤 导出JSON</button></div>
+    </div>
+
+    <!-- 面板4：产品单位特例 -->
+    <div id="productPanel" class="panel">
+        <div class="flex-between"><h3>产品单位特例（商品名+原始单位 → 标准单位/系数）</h3><button id="addProductRuleBtn">➕ 新增规则</button></div>
+        <table class="rule-table" id="productTable"><thead><th>商品名称</th><th>原始单位</th><th>标准单位</th><th>换算系数</th><th>操作</th></thead><tbody id="productTbody"></tbody></td>
+        <div class="toolbar"><button id="importProductBtn" class="secondary">📥 导入JSON</button><button id="exportProductBtn" class="secondary">📤 导出JSON</button><button id="autoExtractBtn" class="secondary">🔍 从数据提取未配置(商品,单位)</button></div>
+    </div>
+
+    <!-- 面板5：清洗&分析 -->
+    <div id="cleanPanel" class="panel">
+        <div class="toolbar">
+            <button id="executeCleanBtn">⚙️ 执行清洗（别名+单位+单价）</button>
+            <button id="analyzePriceBtn" class="secondary">📊 价格波动分析</button>
+            <button id="timeStatBtn" class="secondary">⏱️ 时间维度统计</button>
+            <button id="exportCleanBtn">💾 导出清洗后Excel</button>
+        </div>
+        <div id="cleanStatus" class="status-card"></div>
+        <div id="previewWrapper" style="display:none;"><h4>📋 清洗预览（前30行）</h4><div class="preview-area" id="previewArea"></div></div>
+        <div id="insightArea"></div>
+        <div id="timeStatArea"></div>
+    </div>
+    <footer>🔒 数据完全本地处理，规则保存在浏览器中，可导出/导入。</footer>
+</div>
+
+<script>
+    // ----------------------------- 全局状态 -----------------------------
+    let rawData = [];
+    let headers = [];
+    let mapping = { product: -1, qty: -1, unit: -1, amount: -1, price: -1, date: -1 };
+    let cleanedData = null;
+
+    // 规则库
+    let aliasRules = [];         // { alias, standard }
+    let globalRules = [];
+    let productRules = [];
+
+    // 默认数据
+    const defaultAlias = [
+        { alias: "苹果手机", standard: "智能手机" },
+        { alias: "iPhone", standard: "智能手机" },
+        { alias: "笔记本", standard: "笔记本电脑" },
+        { alias: "laptop", standard: "笔记本电脑" }
+    ];
+    const defaultGlobalRules = [
+        { regex: "公斤|千克|kg|KG", stdUnit: "千克", factor: 1 },
+        { regex: "吨|t|T", stdUnit: "千克", factor: 1000 },
+        { regex: "克|g", stdUnit: "千克", factor: 0.001 },
+        { regex: "斤", stdUnit: "千克", factor: 0.5 },
+        { regex: "个|只|件|台|部", stdUnit: "个", factor: 1 },
+        { regex: "箱", stdUnit: "个", factor: 1 },
+        { regex: "包", stdUnit: "个", factor: 1 },
+        { regex: "袋", stdUnit: "千克", factor: 1 },
+        { regex: "升|L|l", stdUnit: "升", factor: 1 },
+        { regex: "毫升|ml|mL", stdUnit: "升", factor: 0.001 }
+    ];
+
+    // 加载/保存规则
+    function loadRules() {
+        let a = localStorage.getItem('invoice_alias_rules');
+        aliasRules = a ? JSON.parse(a) : [...defaultAlias];
+        let g = localStorage.getItem('invoice_global_rules');
+        globalRules = g ? JSON.parse(g) : [...defaultGlobalRules];
+        let p = localStorage.getItem('invoice_product_rules');
+        productRules = p ? JSON.parse(p) : [];
+        renderAliasTable();
+        renderGlobalTable();
+        renderProductTable();
+    }
+    function saveAlias() { localStorage.setItem('invoice_alias_rules', JSON.stringify(aliasRules)); }
+    function saveGlobal() { localStorage.setItem('invoice_global_rules', JSON.stringify(globalRules)); }
+    function saveProduct() { localStorage.setItem('invoice_product_rules', JSON.stringify(productRules)); }
+
+    function escapeHtml(str) { return String(str ?? '').replace(/[&<>]/g, function(m){if(m==='&')return '&amp;';if(m==='<')return '&lt;';if(m==='>')return '&gt;';return m;}); }
+
+    // 商品别名表格
+    function renderAliasTable() {
+        const tbody = document.getElementById('aliasTbody');
+        tbody.innerHTML = '';
+        aliasRules.forEach((r,i)=>{
+            const row = tbody.insertRow();
+            row.insertCell(0).innerHTML = `<input type="text" value="${escapeHtml(r.alias)}" data-aidx="${i}" data-field="alias" class="alias-input">`;
+            row.insertCell(1).innerHTML = `<input type="text" value="${escapeHtml(r.standard)}" data-aidx="${i}" data-field="standard" class="std-input">`;
+            const btn = document.createElement('button'); btn.textContent='删除'; btn.className='small danger'; btn.onclick=()=>{aliasRules.splice(i,1); saveAlias(); renderAliasTable();};
+            row.insertCell(2).appendChild(btn);
+        });
+        document.querySelectorAll('.alias-input').forEach(inp=>inp.onchange=e=>{aliasRules[inp.dataset.aidx].alias=inp.value; saveAlias();});
+        document.querySelectorAll('.std-input').forEach(inp=>inp.onchange=e=>{aliasRules[inp.dataset.aidx].standard=inp.value; saveAlias();});
+    }
+    function renderGlobalTable() {
+        const tbody = document.getElementById('globalTbody');
+        tbody.innerHTML = '';
+        globalRules.forEach((r,i)=>{
+            const row = tbody.insertRow();
+            row.insertCell(0).innerHTML = `<input type="text" value="${escapeHtml(r.regex)}" data-gidx="${i}" class="g-regex">`;
+            row.insertCell(1).innerHTML = `<input type="text" value="${escapeHtml(r.stdUnit)}" data-gidx="${i}" class="g-stdunit">`;
+            row.insertCell(2).innerHTML = `<input type="number" step="any" value="${r.factor}" data-gidx="${i}" class="g-factor">`;
+            const btn = document.createElement('button'); btn.textContent='删除'; btn.className='small danger'; btn.onclick=()=>{globalRules.splice(i,1); saveGlobal(); renderGlobalTable();};
+            row.insertCell(3).appendChild(btn);
+        });
+        document.querySelectorAll('.g-regex').forEach(inp=>inp.onchange=e=>{globalRules[inp.dataset.gidx].regex=inp.value; saveGlobal();});
+        document.querySelectorAll('.g-stdunit').forEach(inp=>inp.onchange=e=>{globalRules[inp.dataset.gidx].stdUnit=inp.value; saveGlobal();});
+        document.querySelectorAll('.g-factor').forEach(inp=>inp.onchange=e=>{globalRules[inp.dataset.gidx].factor=parseFloat(inp.value)||0; saveGlobal();});
+    }
+    function renderProductTable() {
+        const tbody = document.getElementById('productTbody');
+        tbody.innerHTML = '';
+        productRules.forEach((r,i)=>{
+            const row = tbody.insertRow();
+            row.insertCell(0).innerHTML = `<input type="text" value="${escapeHtml(r.productName)}" data-pidx="${i}" class="p-name">`;
+            row.insertCell(1).innerHTML = `<input type="text" value="${escapeHtml(r.rawUnit)}" data-pidx="${i}" class="p-raw">`;
+            row.insertCell(2).innerHTML = `<input type="text" value="${escapeHtml(r.stdUnit)}" data-pidx="${i}" class="p-std">`;
+            row.insertCell(3).innerHTML = `<input type="number" step="any" value="${r.factor}" data-pidx="${i}" class="p-factor">`;
+            const btn=document.createElement('button'); btn.textContent='删除'; btn.className='small danger'; btn.onclick=()=>{productRules.splice(i,1); saveProduct(); renderProductTable();};
+            row.insertCell(4).appendChild(btn);
+        });
+        document.querySelectorAll('.p-name').forEach(inp=>inp.onchange=e=>{productRules[inp.dataset.pidx].productName=inp.value; saveProduct();});
+        document.querySelectorAll('.p-raw').forEach(inp=>inp.onchange=e=>{productRules[inp.dataset.pidx].rawUnit=inp.value; saveProduct();});
+        document.querySelectorAll('.p-std').forEach(inp=>inp.onchange=e=>{productRules[inp.dataset.pidx].stdUnit=inp.value; saveProduct();});
+        document.querySelectorAll('.p-factor').forEach(inp=>inp.onchange=e=>{productRules[inp.dataset.pidx].factor=parseFloat(inp.value)||0; saveProduct();});
+    }
+
+    // 文件加载
+    function loadFile(file) {
+        const reader = new FileReader();
+        reader.onload = e => {
+            const data = new Uint8Array(e.target.result);
+            const wb = XLSX.read(data, {type:'array'});
+            const sheet = wb.Sheets[wb.SheetNames[0]];
+            const rows = XLSX.utils.sheet_to_json(sheet, {header:1, defval:""});
+            if(!rows||rows.length<2) { alert("至少需要标题行+数据行"); return; }
+            rawData = rows; headers = rows[0];
+            ['colProduct','colQty','colUnit','colAmount','colDate','colPrice'].forEach(id=>{
+                const sel = document.getElementById(id);
+                sel.innerHTML = '<option value="-1">(未选择)</option>';
+                headers.forEach((h,i)=>sel.appendChild(new Option(h,i)));
+            });
+            document.getElementById('fileInfo').style.display='block';
+            document.getElementById('fileInfo').innerHTML=`✅ 已加载 ${file.name}，共${rows.length-1}行。请完成列映射。`;
+        };
+        reader.readAsArrayBuffer(file);
+    }
+    function applyMapping() {
+        const get = (id)=>parseInt(document.getElementById(id).value);
+        const product=get('colProduct'), qty=get('colQty'), unit=get('colUnit'), amount=get('colAmount'), date=get('colDate'), price=get('colPrice');
+        if(product===-1||qty===-1||unit===-1||amount===-1||date===-1) { alert("商品名、数量、单位、金额、日期均为必选"); return; }
+        mapping = { product, qty, unit, amount, price, date };
+        alert("映射已保存，可执行清洗。");
+    }
+
+    // 商品别名标准化
+    function normalizeProductName(original) {
+        if(!original) return "";
+        for(let rule of aliasRules){
+            if(original === rule.alias) return rule.standard;
+        }
+        return original;
+    }
+
+    // 单位换算
+    function findGlobalRule(unit) {
+        if(!unit) return null;
+        for(let r of globalRules){
+            try{ if(new RegExp(r.regex,'i').test(unit)) return {stdUnit:r.stdUnit, factor:r.factor}; }catch(e){}
+        }
+        return null;
+    }
+    function findProductRule(product, unit){
+        if(!product||!unit) return null;
+        return productRules.find(r=>r.productName===product && r.rawUnit===unit);
+    }
+
+    // 执行清洗
+    function performClean() {
+        if(!rawData.length || mapping.product===-1) { alert("请先上传文件并完成列映射"); return; }
+        const rows = rawData.slice(1);
+        const newHeaders = [...headers, "标准商品名", "标准数量", "标准单位", "计算单价", "清洗备注"];
+        const cleanedRows = [];
+        for(let row of rows){
+            let originalProduct = String(row[mapping.product]||"").trim();
+            let stdProduct = normalizeProductName(originalProduct);
+            let qty = parseFloat(row[mapping.qty]);
+            let unitRaw = String(row[mapping.unit]||"").trim();
+            let amount = parseFloat(row[mapping.amount]);
+            let stdQty = qty, stdUnit = unitRaw, factor=1, note="";
+            if(isNaN(qty)||qty===0){ note+="数量无效; "; stdQty=0; }
+            else{
+                const prodMatch = findProductRule(stdProduct, unitRaw);
+                if(prodMatch){
+                    stdUnit=prodMatch.stdUnit;
+                    factor=prodMatch.factor;
+                    stdQty=qty*factor;
+                }else{
+                    const globalMatch = findGlobalRule(unitRaw);
+                    if(globalMatch){
+                        stdUnit=globalMatch.stdUnit;
+                        factor=globalMatch.factor;
+                        stdQty=qty*factor;
+                    }else{
+                        note+=`单位“${unitRaw}”无匹配规则，未换算; `;
+                        stdUnit=unitRaw;
+                    }
+                }
+            }
+            let calcPrice = NaN;
+            if(!isNaN(amount) && !isNaN(stdQty) && stdQty!==0){
+                calcPrice = amount/stdQty;
+                calcPrice = Math.round(calcPrice*100)/100;
+            }else{ note+="金额或标准数量无效，无法计算单价; "; }
+            if(note==="") note="OK";
+            const newRow = [...row, stdProduct, stdQty, stdUnit, isNaN(calcPrice)?"":calcPrice, note];
+            cleanedRows.push(newRow);
+        }
+        cleanedData = [newHeaders, ...cleanedRows];
+        showPreview(cleanedData);
+        document.getElementById('cleanStatus').innerHTML = "✅ 清洗完成！已添加「标准商品名」「标准数量」「标准单位」「计算单价」「清洗备注」列。";
+    }
+
+    function showPreview(data){
+        const wrapper = document.getElementById('previewWrapper');
+        const container = document.getElementById('previewArea');
+        if(!data||data.length<2){ wrapper.style.display='none'; return; }
+        let html = '<table class="preview-table"><thead><tr>';
+        data[0].forEach(h=>html+=`<th>${escapeHtml(h)}</th>`);
+        html+='</tr></thead><tbody>';
+        for(let i=1;i<Math.min(data.length,31);i++){
+            html+='<tr>';
+            data[i].forEach(cell=>html+=`<td>${escapeHtml(String(cell))}</td>`);
+            html+='</tr>';
+        }
+        html+='</tbody><table>';
+        container.innerHTML = html;
+        wrapper.style.display='block';
+    }
+
+    // 价格波动分析（基于标准商品名+标准单位）
+    function analyzePrice() {
+        if(!cleanedData) { alert("请先执行清洗"); return; }
+        const headers = cleanedData[0];
+        const rows = cleanedData.slice(1);
+        const stdProductIdx = headers.indexOf("标准商品名");
+        const stdUnitIdx = headers.indexOf("标准单位");
+        const priceIdx = headers.indexOf("计算单价");
+        if(stdProductIdx===-1 || priceIdx===-1) { alert("清洗数据不完整"); return; }
+        const groups = new Map();
+        for(let row of rows){
+            let product = row[stdProductIdx];
+            let unit = row[stdUnitIdx];
+            let price = parseFloat(row[priceIdx]);
+            if(isNaN(price) || !product) continue;
+            const key = `${product}|${unit}`;
+            if(!groups.has(key)) groups.set(key, []);
+            groups.get(key).push(price);
+        }
+        let html = `<div class="insight-card"><h3>📊 价格波动统计（标准商品名+标准单位）</h3><table class="rule-table"><thead><th>商品</th><th>单位</th><th>记录数</th><th>平均单价</th><th>标准差</th><th>变异系数</th></thead><tbody>`;
+        for(let [key, prices] of groups.entries()){
+            const n = prices.length;
+            const mean = prices.reduce((a,b)=>a+b,0)/n;
+            const variance = prices.reduce((sum,p)=>sum + (p-mean)**2,0)/n;
+            const std = Math.sqrt(variance);
+            const cv = mean===0?0:std/mean;
+            const [prod, unit] = key.split('|');
+            html += `<tr><td>${escapeHtml(prod)}</td><td>${escapeHtml(unit)}</td><td>${n}</td><td>${mean.toFixed(2)}</td><td>${std.toFixed(2)}</td><td>${(cv*100).toFixed(1)}%</td></tr>`;
+        }
+        html += `</tbody></table></div>`;
+        document.getElementById('insightArea').innerHTML = html;
+    }
+
+    // 时间维度统计
+    function timeStat() {
+        if(!cleanedData) { alert("请先执行清洗"); return; }
+        const headers = cleanedData[0];
+        const dateColIdx = mapping.date;
+        if(dateColIdx === -1){ alert("未映射日期列"); return; }
+        const rows = cleanedData.slice(1);
+        const stdProductIdx = headers.indexOf("标准商品名");
+        const stdUnitIdx = headers.indexOf("标准单位");
+        const stdQtyIdx = headers.indexOf("标准数量");
+        const amountIdx = mapping.amount;
+        if(stdProductIdx===-1 || stdQtyIdx===-1) { alert("清洗数据缺少标准数量列"); return; }
+        const granularity = prompt("选择时间分组：\n1 按年\n2 按季度\n3 按月", "1");
+        let groupType = "year";
+        if(granularity === "2") groupType = "quarter";
+        else if(granularity === "3") groupType = "month";
+        const groups = new Map();
+        for(let row of rows){
+            let product = row[stdProductIdx];
+            let unit = row[stdUnitIdx];
+            let stdQty = parseFloat(row[stdQtyIdx]);
+            let amount = parseFloat(row[amountIdx]);
+            if(isNaN(stdQty) || isNaN(amount) || !product) continue;
+            let dateVal = row[dateColIdx];
+            let date = new Date(dateVal);
+            if(isNaN(date.getTime())) continue;
+            let period = "";
+            if(groupType === "year") period = date.getFullYear().toString();
+            else if(groupType === "quarter") period = `${date.getFullYear()}-Q${Math.floor(date.getMonth()/3)+1}`;
+            else period = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}`;
+            const key = `${product}|${unit}|${period}`;
+            if(!groups.has(key)) groups.set(key, { product, unit, period, totalQty:0, totalAmount:0 });
+            let g = groups.get(key);
+            g.totalQty += stdQty;
+            g.totalAmount += amount;
+        }
+        if(groups.size===0){ alert("无有效数据"); return; }
+        let stats = Array.from(groups.values()).map(g => ({...g, avgPrice: g.totalQty===0?0:(g.totalAmount/g.totalQty).toFixed(2)}));
+        stats.sort((a,b)=>a.period.localeCompare(b.period));
+        let html = `<div class="insight-card"><h3>📅 按${groupType==='year'?'年':(groupType==='quarter'?'季度':'月')}统计（标准商品名+标准单位）</h3>
+                    <table class="rule-table"><thead><th>商品</th><th>单位</th><th>时间段</th><th>总数量</th><th>总金额</th><th>整体单价</th></thead><tbody>`;
+        for(let s of stats){
+            html += `<tr><td>${escapeHtml(s.product)}</td><td>${escapeHtml(s.unit)}</td><td>${escapeHtml(s.period)}</td><td>${s.totalQty.toFixed(2)}</td><td>${s.totalAmount.toFixed(2)}</td><td>${s.avgPrice}</td></tr>`;
+        }
+        html += `</tbody></table><button id="exportTimeCsv" class="secondary" style="margin-top:12px;">📎 导出CSV</button></div>`;
+        document.getElementById('timeStatArea').innerHTML = html;
+        document.getElementById('exportTimeCsv').onclick = () => {
+            let csv = [["商品","单位","时间段","总数量","总金额","整体单价"]];
+            stats.forEach(s=>csv.push([s.product, s.unit, s.period, s.totalQty, s.totalAmount, s.avgPrice]));
+            let blob = new Blob(["\uFEFF" + csv.map(r=>r.join(",")).join("\n")], {type:"text/csv"});
+            let a = document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`timestat_${groupType}.csv`; a.click(); URL.revokeObjectURL(blob);
+        };
+    }
+
+    function exportCleaned(){
+        if(!cleanedData){ alert("无清洗数据"); return; }
+        const ws = XLSX.utils.aoa_to_sheet(cleanedData);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "清洗结果");
+        XLSX.writeFile(wb, `cleaned_${new Date().toISOString().slice(0,19)}.xlsx`);
+    }
+
+    // 辅助：从当前数据提取未配置的产品单位组合（基于标准商品名）
+    function autoExtractProductUnit() {
+        if(!rawData.length || mapping.product===-1 || mapping.unit===-1){ alert("请先加载文件并完成列映射"); return; }
+        const rows = rawData.slice(1);
+        const existing = new Set(productRules.map(r=>`${r.productName}|${r.rawUnit}`));
+        const cand = [];
+        for(let row of rows){
+            let original = String(row[mapping.product]||"").trim();
+            let stdProduct = normalizeProductName(original);
+            let u = String(row[mapping.unit]||"").trim();
+            if(stdProduct && u && !existing.has(`${stdProduct}|${u}`)) cand.push({product:stdProduct, unit:u});
+        }
+        const uniq = [];
+        const seen = new Set();
+        for(let c of cand){ let key=`${c.product}|${c.unit}`; if(!seen.has(key)){ seen.add(key); uniq.push(c); } }
+        if(uniq.length===0){ alert("所有组合均已配置"); return; }
+        let msg = "发现以下未配置组合，是否逐一添加？\n";
+        uniq.forEach(u=>msg+=`${u.product} → ${u.unit}\n`);
+        if(!confirm(msg)) return;
+        for(let u of uniq){
+            let std = prompt(`商品【${u.product}】单位【${u.unit}】\n标准单位:`, "千克");
+            if(!std) continue;
+            let factor = parseFloat(prompt(`换算系数：1 ${u.unit} = ? ${std}`, "1"));
+            if(isNaN(factor)) factor=1;
+            productRules.push({ productName: u.product, rawUnit: u.unit, stdUnit: std, factor });
+        }
+        saveProduct(); renderProductTable();
+        alert("已添加产品特例规则");
+    }
+
+    // 事件绑定
+    document.getElementById('loadFileBtn').onclick=()=>{ const f=document.getElementById('fileInput').files[0]; if(f) loadFile(f); else alert("请选择文件"); };
+    document.getElementById('applyMappingBtn').onclick=applyMapping;
+    document.getElementById('executeCleanBtn').onclick=performClean;
+    document.getElementById('analyzePriceBtn').onclick=analyzePrice;
+    document.getElementById('timeStatBtn').onclick=timeStat;
+    document.getElementById('exportCleanBtn').onclick=exportCleaned;
+    document.getElementById('addAliasBtn').onclick=()=>{ aliasRules.push({alias:"新别名",standard:"标准名"}); saveAlias(); renderAliasTable(); };
+    document.getElementById('importAliasBtn').onclick=()=>{ let inp=document.createElement('input'); inp.type='file'; inp.accept='.json'; inp.onchange=e=>{ let f=e.target.files[0]; let fr=new FileReader(); fr.onload=ev=>{ try{ aliasRules=JSON.parse(ev.target.result); saveAlias(); renderAliasTable(); }catch(e){alert("解析失败");} }; fr.readAsText(f); }; inp.click(); };
+    document.getElementById('exportAliasBtn').onclick=()=>{ let data=JSON.stringify(aliasRules,null,2); let blob=new Blob([data],{type:'application/json'}); let a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='alias_rules.json'; a.click(); URL.revokeObjectURL(blob); };
+    document.getElementById('addGlobalRuleBtn').onclick=()=>{ globalRules.push({regex:"新单位",stdUnit:"标准单位",factor:1}); saveGlobal(); renderGlobalTable(); };
+    document.getElementById('importGlobalBtn').onclick=()=>{ let inp=document.createElement('input'); inp.type='file'; inp.accept='.json'; inp.onchange=e=>{ let f=e.target.files[0]; let fr=new FileReader(); fr.onload=ev=>{ try{ globalRules=JSON.parse(ev.target.result); saveGlobal(); renderGlobalTable(); }catch(e){alert("解析失败");} }; fr.readAsText(f); }; inp.click(); };
+    document.getElementById('exportGlobalBtn').onclick=()=>{ let data=JSON.stringify(globalRules,null,2); let blob=new Blob([data],{type:'application/json'}); let a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='global_rules.json'; a.click(); URL.revokeObjectURL(blob); };
+    document.getElementById('addProductRuleBtn').onclick=()=>{ productRules.push({productName:"商品名",rawUnit:"原单位",stdUnit:"标准单位",factor:1}); saveProduct(); renderProductTable(); };
+    document.getElementById('importProductBtn').onclick=()=>{ let inp=document.createElement('input'); inp.type='file'; inp.accept='.json'; inp.onchange=e=>{ let f=e.target.files[0]; let fr=new FileReader(); fr.onload=ev=>{ try{ productRules=JSON.parse(ev.target.result); saveProduct(); renderProductTable(); }catch(e){alert("解析失败");} }; fr.readAsText(f); }; inp.click(); };
+    document.getElementById('exportProductBtn').onclick=()=>{ let data=JSON.stringify(productRules,null,2); let blob=new Blob([data],{type:'application/json'}); let a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='product_rules.json'; a.click(); URL.revokeObjectURL(blob); };
+    document.getElementById('autoExtractBtn').onclick=autoExtractProductUnit;
+
+    // 标签页切换
+    document.querySelectorAll('.tab-btn').forEach(btn=>{
+        btn.addEventListener('click',()=>{
+            const id=btn.getAttribute('data-tab');
+            document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+            document.getElementById(`${id}Panel`).classList.add('active');
+            document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+            btn.classList.add('active');
+        });
+    });
+    loadRules();
+</script>
+</body>
+</html>

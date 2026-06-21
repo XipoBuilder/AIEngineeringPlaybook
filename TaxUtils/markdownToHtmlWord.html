@@ -1,0 +1,802 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <!-- 设置网页编码为 UTF-8，支持中文显示 -->
+    <meta charset="UTF-8">
+    <!-- 让网页在手机等小屏幕上也能正常显示（响应式布局） -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- 浏览器标签页上显示的标题 -->
+    <title>Markdown 转 Word 转换工具</title>
+
+    <!--
+        ==================== 引入第三方库（CDN 在线加载） ====================
+        这两个库都从 jsdelivr CDN 加载，需要联网才能使用。
+        如果某个库加载失败，对应的功能会不可用，但其他功能不受影响。
+    -->
+
+    <!-- showdown.js：把 Markdown 文本转换成 HTML -->
+    <script src="https://cdn.jsdelivr.net/npm/showdown@2.1.0/dist/showdown.min.js"></script>
+
+    <!-- FileSaver.js：让浏览器能保存文件到本地（触发下载） -->
+    <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
+
+    <!--
+        ==================== CSS 样式 ====================
+        下面用 <style> 标签定义页面的外观样式。
+        整体布局：顶部标题栏 → 设置栏 → 中间双栏（左编辑/右预览）→ 底部按钮栏
+    -->
+    <style>
+        /* ---- 全局重置 ---- */
+        /* 清除所有元素的默认内外边距，统一用 border-box 计算尺寸 */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        /* ---- 页面整体 ---- */
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+            background: #f0f4f8;  /* 浅灰蓝色背景 */
+            color: #333;          /* 深灰色文字 */
+            min-height: 100vh;    /* 至少占满整个屏幕高度 */
+        }
+
+        /* ---- 顶部标题栏 ---- */
+        .header {
+            background: linear-gradient(135deg, #1a73e8, #1557b0); /* 蓝色渐变背景 */
+            color: #fff;           /* 白色文字 */
+            padding: 16px 24px;    /* 内边距：上下16px，左右24px */
+            display: flex;         /* 使用弹性布局，让标题和按钮左右排列 */
+            align-items: center;   /* 垂直居中 */
+            justify-content: space-between; /* 两端对齐 */
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15); /* 底部阴影，增加层次感 */
+        }
+        .header h1 { font-size: 20px; font-weight: 600; } /* 标题文字样式 */
+
+        /* 标题栏右侧的按钮组 */
+        .header-actions { display: flex; gap: 8px; }
+        .header-actions button {
+            background: rgba(255,255,255,0.2); /* 半透明白色背景 */
+            color: #fff;
+            border: 1px solid rgba(255,255,255,0.3);
+            padding: 6px 14px;
+            border-radius: 6px;    /* 圆角 */
+            cursor: pointer;       /* 鼠标放上去变成手型 */
+            font-size: 13px;
+            transition: background 0.2s; /* 鼠标悬停时背景色平滑变化 */
+        }
+        .header-actions button:hover { background: rgba(255,255,255,0.35); }
+
+        /* ---- 设置栏（文档标题、作者、字体、字号） ---- */
+        .settings-bar {
+            background: #fff;
+            border-bottom: 1px solid #e0e6ed; /* 底部分割线 */
+            padding: 12px 24px;
+            display: flex;
+            flex-wrap: wrap;       /* 空间不够时自动换行 */
+            gap: 12px;             /* 各设置项之间的间距 */
+            align-items: center;
+        }
+
+        /* 每个设置项：标签 + 输入框/下拉框 */
+        .setting-group {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .setting-group label {
+            font-size: 13px;
+            color: #555;
+            white-space: nowrap;   /* 标签文字不换行 */
+        }
+        .setting-group input,
+        .setting-group select {
+            padding: 5px 8px;
+            border: 1px solid #d0d7de;
+            border-radius: 4px;
+            font-size: 13px;
+            outline: none;         /* 去掉默认的聚焦外框 */
+            transition: border-color 0.2s;
+        }
+        /* 输入框获得焦点时，边框变成蓝色 */
+        .setting-group input:focus,
+        .setting-group select:focus { border-color: #1a73e8; }
+        .setting-group input[type="text"] { width: 140px; }
+        .setting-group select { width: 120px; }
+
+        /* ---- 中间主区域：左右双栏布局 ---- */
+        .main {
+            display: flex;         /* 弹性布局，让左右两栏并排 */
+            gap: 0;
+            height: calc(100vh - 130px); /* 高度 = 屏幕高度 - 顶部和底部栏的高度 */
+            padding: 12px;
+        }
+
+        /* 每一栏（左编辑区 / 右预览区）的公共样式 */
+        .panel {
+            flex: 1;               /* 两栏各占一半宽度 */
+            display: flex;
+            flex-direction: column; /* 内部垂直排列：标题栏 + 内容区 */
+            background: #fff;
+            border-radius: 8px;
+            overflow: hidden;      /* 超出部分隐藏（配合圆角） */
+            box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+        }
+        .panel:first-child { margin-right: 6px; }  /* 左栏右边留点间距 */
+        .panel:last-child { margin-left: 6px; }    /* 右栏左边留点间距 */
+
+        /* 每栏顶部的标题栏 */
+        .panel-header {
+            background: #f7f9fc;
+            border-bottom: 1px solid #e0e6ed;
+            padding: 8px 16px;
+            font-size: 13px;
+            font-weight: 600;
+            color: #1a73e8;        /* 蓝色标题 */
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        /* ---- 左侧编辑区（textarea 文本框） ---- */
+        #editor {
+            flex: 1;               /* 占满剩余空间 */
+            width: 100%;
+            border: none;          /* 去掉边框 */
+            padding: 16px;
+            font-family: 'Consolas', 'Courier New', monospace; /* 等宽字体，方便写代码 */
+            font-size: 14px;
+            line-height: 1.7;      /* 行高，让文字不那么挤 */
+            resize: none;          /* 禁止用户拖拽调整大小 */
+            outline: none;
+            color: #333;
+        }
+
+        /* ---- 右侧预览区 ---- */
+        #preview {
+            flex: 1;
+            padding: 16px;
+            overflow-y: auto;      /* 内容超出时出现垂直滚动条 */
+            font-size: 14px;
+            line-height: 1.8;
+        }
+
+        /* ---- 预览区内各种 Markdown 元素的样式 ---- */
+        /* 标题 */
+        #preview h1 { font-size: 24px; margin: 16px 0 8px; border-bottom: 2px solid #1a73e8; padding-bottom: 6px; }
+        #preview h2 { font-size: 20px; margin: 14px 0 6px; border-bottom: 1px solid #e0e6ed; padding-bottom: 4px; }
+        #preview h3 { font-size: 17px; margin: 12px 0 6px; }
+        #preview h4 { font-size: 15px; margin: 10px 0 4px; }
+        /* 段落 */
+        #preview p { margin: 8px 0; }
+        /* 列表 */
+        #preview ul, #preview ol { padding-left: 24px; margin: 8px 0; }
+        #preview li { margin: 4px 0; }
+        /* 引用块：左边蓝色竖线 + 浅灰背景 */
+        #preview blockquote {
+            border-left: 4px solid #1a73e8;
+            padding: 8px 16px;
+            margin: 8px 0;
+            background: #f0f4f8;
+            color: #555;
+        }
+        /* 代码块：深色背景 + 浅色文字 */
+        #preview pre {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 12px 16px;
+            border-radius: 6px;
+            overflow-x: auto;      /* 代码太长时出现水平滚动条 */
+            margin: 8px 0;
+            font-size: 13px;
+        }
+        /* 行内代码：浅灰背景 + 粉色文字 */
+        #preview code {
+            background: #f0f2f5;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 13px;
+            color: #e83e8c;
+        }
+        /* 代码块内的 code 元素去掉特殊样式（继承 pre 的样式） */
+        #preview pre code { background: none; padding: 0; color: inherit; }
+        /* 表格 */
+        #preview table { border-collapse: collapse; width: 100%; margin: 8px 0; }
+        #preview th, #preview td { border: 1px solid #d0d7de; padding: 8px 12px; text-align: left; }
+        #preview th { background: #f0f4f8; font-weight: 600; }
+        /* 图片 */
+        #preview img { max-width: 100%; border-radius: 4px; }
+        /* 链接 */
+        #preview a { color: #1a73e8; text-decoration: none; }
+        #preview a:hover { text-decoration: underline; }
+        /* 分割线 */
+        #preview hr { border: none; border-top: 1px solid #e0e6ed; margin: 16px 0; }
+
+        /* ---- 底部按钮栏 ---- */
+        .footer {
+            background: #fff;
+            border-top: 1px solid #e0e6ed;
+            padding: 10px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .footer-left { display: flex; gap: 8px; align-items: center; }
+        .footer-right { display: flex; gap: 8px; align-items: center; }
+
+        /* ---- 通用按钮样式 ---- */
+        .btn {
+            padding: 8px 18px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .btn-primary { background: #1a73e8; color: #fff; }     /* 蓝色主按钮 */
+        .btn-primary:hover { background: #1557b0; }
+        .btn-secondary { background: #f0f4f8; color: #333; border: 1px solid #d0d7de; } /* 灰色次要按钮 */
+        .btn-secondary:hover { background: #e2e8f0; }
+        .btn-success { background: #0d9488; color: #fff; }     /* 绿色成功按钮 */
+        .btn-success:hover { background: #0b7c72; }
+        .btn-warning { background: #f59e0b; color: #fff; }     /* 橙色警告按钮 */
+        .btn-warning:hover { background: #d97706; }
+
+        /* ---- Toast 提示消息（右上角弹出） ---- */
+        .toast-container {
+            position: fixed;       /* 固定在屏幕上，不随页面滚动 */
+            top: 20px;
+            right: 20px;
+            z-index: 9999;         /* 确保在最上层 */
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .toast {
+            padding: 12px 20px;
+            border-radius: 8px;
+            color: #fff;
+            font-size: 14px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            animation: slideIn 0.3s ease, fadeOut 0.3s ease 2.7s; /* 进入动画 + 消失动画 */
+            max-width: 360px;
+        }
+        .toast-success { background: #0d9488; } /* 成功：绿色 */
+        .toast-error { background: #dc2626; }   /* 错误：红色 */
+        .toast-info { background: #1a73e8; }    /* 信息：蓝色 */
+
+        /* Toast 动画：从右侧滑入 */
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        /* Toast 动画：淡出消失 */
+        @keyframes fadeOut {
+            from { opacity: 1; }
+            to { opacity: 0; }
+        }
+
+        /* ---- 响应式布局：屏幕宽度小于 768px 时（手机/平板） ---- */
+        @media (max-width: 768px) {
+            .main { flex-direction: column; height: auto; } /* 双栏变成上下排列 */
+            .panel { min-height: 300px; margin: 0 0 8px 0 !important; }
+            .panel:first-child { margin-right: 0 !important; }
+            .settings-bar { padding: 8px 12px; }
+            .setting-group input[type="text"] { width: 100px; }
+            .header h1 { font-size: 16px; }
+            .footer { padding: 8px 12px; }
+        }
+
+        /* ---- 浏览器兼容性提示（默认隐藏，检测到不兼容时才显示） ---- */
+        .compat-notice {
+            display: none;
+            background: #fef3c7;
+            color: #92400e;
+            padding: 8px 16px;
+            text-align: center;
+            font-size: 13px;
+        }
+    </style>
+</head>
+<body>
+    <!--
+        ==================== HTML 页面结构 ====================
+        整体从上到下分为 5 个部分：
+        1. 兼容性提示条（默认隐藏）
+        2. 顶部标题栏
+        3. 设置栏（文档标题、作者、字体、字号）
+        4. 中间主区域（左编辑 + 右预览）
+        5. 底部按钮栏
+    -->
+
+    <!-- 兼容性提示：如果浏览器太旧，会显示这条黄色提示 -->
+    <div class="compat-notice" id="compatNotice">
+        您的浏览器可能不完全支持此工具，建议使用 Chrome、Firefox 或 Edge 最新版本。
+    </div>
+
+    <!-- 顶部标题栏 -->
+    <div class="header">
+        <h1>Markdown 转 Word 转换工具</h1>
+        <div class="header-actions">
+            <!-- onclick="loadTemplate()" 表示点击按钮时调用 JS 中的 loadTemplate 函数 -->
+            <button onclick="loadTemplate()" title="插入基础结构示例">示例模板</button>
+            <button onclick="clearEditor()" title="清空编辑器">清空</button>
+        </div>
+    </div>
+
+    <!-- 设置栏：用户可以配置导出 Word 文档的属性 -->
+    <div class="settings-bar">
+        <div class="setting-group">
+            <label>文档标题：</label>
+            <input type="text" id="docTitle" value="我的文档" placeholder="输入文档标题">
+        </div>
+        <div class="setting-group">
+            <label>作者：</label>
+            <input type="text" id="docAuthor" value="" placeholder="作者名">
+        </div>
+        <div class="setting-group">
+            <label>字体：</label>
+            <select id="docFont">
+                <option value="Microsoft YaHei">微软雅黑</option>
+                <option value="SimSun">宋体</option>
+                <option value="SimHei">黑体</option>
+                <option value="KaiTi">楷体</option>
+                <option value="FangSong">仿宋</option>
+                <option value="Arial">Arial</option>
+                <option value="Times New Roman">Times New Roman</option>
+                <option value="Calibri">Calibri</option>
+            </select>
+        </div>
+        <div class="setting-group">
+            <label>字号：</label>
+            <select id="docFontSize">
+                <option value="20">小五 (9pt)</option>
+                <option value="21">五号 (10.5pt)</option>
+                <!-- selected 表示默认选中这一项 -->
+                <option value="24" selected>小四 (12pt)</option>
+                <option value="28">四号 (14pt)</option>
+                <option value="32">三号 (16pt)</option>
+                <option value="36">小二 (18pt)</option>
+                <option value="44">二号 (22pt)</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- 中间主区域：左右双栏 -->
+    <div class="main">
+        <!-- 左栏：Markdown 编辑区 -->
+        <div class="panel">
+            <div class="panel-header">
+                <span>Markdown 编辑</span>
+                <span id="charCount">0 字符</span> <!-- 实时显示字符数 -->
+            </div>
+            <textarea id="editor" placeholder="在此输入 Markdown 内容..."></textarea>
+        </div>
+        <!-- 右栏：实时预览区 -->
+        <div class="panel">
+            <div class="panel-header">
+                <span>实时预览</span>
+            </div>
+            <div id="preview"></div> <!-- Markdown 渲染后的 HTML 会插入到这里 -->
+        </div>
+    </div>
+
+    <!-- 底部按钮栏 -->
+    <div class="footer">
+        <div class="footer-left">
+            <button class="btn btn-primary" onclick="exportWord()" title="导出为 Word 文档">导出 Word</button>
+            <button class="btn btn-secondary" onclick="copyMarkdown()" title="复制 Markdown 内容">复制 Markdown</button>
+            <button class="btn btn-secondary" onclick="copyHTML()" title="复制渲染后的 HTML">复制 HTML</button>
+        </div>
+        <div class="footer-right">
+            <button class="btn btn-warning" onclick="loadTemplate()" title="插入基础结构示例模板">基础结构模板</button>
+        </div>
+    </div>
+
+    <!-- Toast 消息容器：所有提示消息都会动态插入到这里 -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!--
+        ==================== JavaScript 逻辑代码 ====================
+        下面是整个工具的核心逻辑，分为以下几个模块：
+        1. 初始化：获取页面元素、检测浏览器、加载第三方库
+        2. 实时预览：用户输入 Markdown 时，右侧实时显示渲染结果
+        3. 复制功能：复制 Markdown 原文或渲染后的 HTML 到剪贴板
+        4. 导出 Word：把 Markdown 转成 HTML，再转成 Word 文档并下载
+        5. 示例模板：提供一段预置的 Markdown 示例文本
+        6. Toast 通知：在右上角弹出短暂的操作提示
+    -->
+    <script>
+    // ==================== 1. 初始化 ====================
+
+    // 获取页面上的关键元素，方便后面使用
+    // getElementById 就是通过元素的 id 属性找到它，类似于通过门牌号找到房间
+    var editor = document.getElementById('editor');       // 左侧编辑框
+    var previewEl = document.getElementById('preview');   // 右侧预览区
+    var charCountEl = document.getElementById('charCount'); // 字符数显示
+
+    // ---- 浏览器兼容性检测 ----
+    // 用"立即执行函数"检测浏览器是否支持 Promise 和 fetch（这两个是现代 JS 的基础功能）
+    // 如果不支持，就显示顶部的黄色兼容性提示条
+    (function() {
+        var ok = typeof Promise !== 'undefined' && typeof fetch !== 'undefined';
+        if (!ok) document.getElementById('compatNotice').style.display = 'block';
+    })();
+
+    // ---- 检查第三方库是否加载成功 ----
+    // 如果库加载失败（比如网络断了），给用户弹出错误提示
+    if (typeof saveAs === 'undefined') {
+        console.error('FileSaver.js 库加载失败');
+        showToast('文件保存库加载失败，请刷新页面或检查网络连接', 'error');
+    }
+
+    // ---- 初始化 showdown 转换器 ----
+    // showdown 的作用：把 Markdown 文本转换成 HTML
+    // 例如：把 "# 标题" 转换成 "<h1>标题</h1>"
+    var converter;
+    try {
+        converter = new showdown.Converter({
+            tables: true,            // 支持表格语法
+            tasklists: true,         // 支持任务列表（如 - [x] 已完成）
+            strikethrough: true,     // 支持删除线（如 ~~删除~~）
+            ghCodeBlocks: true,      // 支持 GitHub 风格的代码块
+            simpleLineBreaks: true,  // 支持简单换行
+            openLinksInNewWindow: true, // 链接在新窗口打开
+            emoji: true              // 支持表情符号
+        });
+    } catch (e) {
+        // 如果 showdown 加载失败，捕获异常并提示用户
+        console.error('showdown 初始化失败:', e);
+        showToast('Markdown 解析器加载失败，请刷新页面重试', 'error');
+    }
+
+    // ==================== 2. 实时预览 ====================
+
+    // 防抖定时器：用户快速输入时，不需要每次都立即渲染，等停下来 150ms 后再渲染
+    // 这样可以避免频繁渲染导致页面卡顿
+    var debounceTimer;
+    editor.addEventListener('input', function() {
+        // 每次输入时，先清除上一次的定时器
+        clearTimeout(debounceTimer);
+        // 重新设置定时器：150ms 后执行渲染
+        debounceTimer = setTimeout(updatePreview, 150);
+        // 同时更新字符数显示
+        updateCharCount();
+    });
+
+    /**
+     * 更新预览区内容
+     * 把编辑区的 Markdown 文本转换成 HTML，然后显示在右侧预览区
+     */
+    function updatePreview() {
+        // 如果 showdown 没加载成功，显示错误提示
+        if (!converter) {
+            previewEl.innerHTML = '<p style="color:#dc2626;">Markdown 解析器未加载，请刷新页面</p>';
+            return;
+        }
+        try {
+            // 核心转换：Markdown → HTML
+            var html = converter.makeHtml(editor.value);
+            // 把生成的 HTML 插入到预览区
+            previewEl.innerHTML = html;
+        } catch (e) {
+            console.error('预览渲染失败:', e);
+            previewEl.innerHTML = '<p style="color:#dc2626;">渲染出错，请检查 Markdown 格式</p>';
+        }
+    }
+
+    /**
+     * 更新字符数显示
+     */
+    function updateCharCount() {
+        charCountEl.textContent = editor.value.length + ' 字符';
+    }
+
+    // ==================== 3. 复制功能 ====================
+
+    /**
+     * 复制 Markdown 原文到剪贴板
+     */
+    function copyMarkdown() {
+        // 先检查编辑区是否有内容
+        if (!editor.value.trim()) { showToast('编辑区为空', 'info'); return; }
+        // 调用通用的复制到剪贴板函数
+        copyToClipboard(editor.value, 'Markdown 已复制到剪贴板', '复制失败，请手动复制');
+    }
+
+    /**
+     * 复制渲染后的 HTML 到剪贴板
+     */
+    function copyHTML() {
+        if (!editor.value.trim()) { showToast('编辑区为空', 'info'); return; }
+        if (!converter) { showToast('Markdown 解析器未加载，请刷新页面', 'error'); return; }
+        try {
+            // 先把 Markdown 转成 HTML
+            var html = converter.makeHtml(editor.value);
+            // 再把 HTML 复制到剪贴板
+            copyToClipboard(html, 'HTML 已复制到剪贴板', '复制失败，请手动复制');
+        } catch (e) {
+            console.error('HTML 复制失败:', e);
+            showToast('转换 HTML 失败: ' + e.message, 'error');
+        }
+    }
+
+    /**
+     * 通用复制函数：把文本复制到剪贴板
+     * @param {string} text    - 要复制的文本内容
+     * @param {string} okMsg   - 复制成功时显示的提示消息
+     * @param {string} failMsg - 复制失败时显示的提示消息
+     */
+    function copyToClipboard(text, okMsg, failMsg) {
+        // 优先使用现代浏览器的 Clipboard API（更安全可靠）
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(function() {
+                showToast(okMsg, 'success');
+            }).catch(function() {
+                // 如果 Clipboard API 失败，降级使用旧方法
+                fallbackCopy(text, okMsg, failMsg);
+            });
+        } else {
+            // 旧浏览器不支持 Clipboard API，直接用降级方法
+            fallbackCopy(text, okMsg, failMsg);
+        }
+    }
+
+    /**
+     * 降级复制方法：通过创建一个隐藏的 textarea 来实现复制
+     * 兼容不支持 Clipboard API 的旧浏览器
+     */
+    function fallbackCopy(text, okMsg, failMsg) {
+        try {
+            // 1. 创建一个临时的 textarea 元素
+            var ta = document.createElement('textarea');
+            ta.value = text;
+            // 把它放到屏幕外面（用户看不到）
+            ta.style.cssText = 'position:fixed;left:-9999px;top:-9999px';
+            document.body.appendChild(ta);
+            // 2. 选中 textarea 中的文字
+            ta.focus();
+            ta.select();
+            // 3. 执行复制命令（相当于按了 Ctrl+C）
+            var ok = document.execCommand('copy');
+            // 4. 清理：删除临时元素
+            document.body.removeChild(ta);
+            // 5. 根据复制结果给用户提示
+            showToast(ok ? okMsg : failMsg, ok ? 'success' : 'error');
+        } catch (e) {
+            console.error('Fallback 复制失败:', e);
+            showToast(failMsg, 'error');
+        }
+    }
+
+    // ==================== 4. 导出 Word ====================
+
+    /**
+     * 导出 Word 文档
+     * 方案：生成 HTML 格式的 Word 文档（Word 可以打开 HTML 格式的 .doc 文件）
+     */
+    function exportWord() {
+        var md = editor.value;
+        if (!md.trim()) {
+            showToast('编辑区为空，请先输入 Markdown 内容', 'info');
+            return;
+        }
+        if (!converter) {
+            showToast('Markdown 解析器未加载，请刷新页面', 'error');
+            return;
+        }
+
+        try {
+            showToast('正在生成 Word 文档...', 'info');
+
+            var docTitle = document.getElementById('docTitle').value || '文档';
+            var docFont = document.getElementById('docFont').value || 'Microsoft YaHei';
+            var docFontSize = parseInt(document.getElementById('docFontSize').value) || 24;
+            var fontSizePt = docFontSize / 2; // 转换为 pt
+
+            // 把 Markdown 转成 HTML
+            var htmlContent = converter.makeHtml(md);
+            
+            // 将 <del> 标签替换为 <s> 标签，避免 Word 将其解释为修订标记
+            htmlContent = htmlContent.replace(/<del>/g, '<s>').replace(/<\/del>/g, '</s>');
+
+            // 构造 Word 可识别的 HTML 格式
+            var wordHtml = `
+<html xmlns:o="urn:schemas-microsoft-com:office:office"
+      xmlns:w="urn:schemas-microsoft-com:office:word"
+      xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+    <meta charset="utf-8">
+    <meta name="ProgId" content="Word.Document">
+    <meta name="Generator" content="Microsoft Word 15">
+    <meta name="Originator" content="Microsoft Word 15">
+    <title>${docTitle}</title>
+    <!--[if gte mso 9]>
+    <xml>
+        <w:WordDocument>
+            <w:View>Print</w:View>
+            <w:Zoom>100</w:Zoom>
+            <w:SpellingState>Clean</w:SpellingState>
+            <w:GrammarState>Clean</w:GrammarState>
+            <w:TrackRevisions w:val="false"/>
+            <w:DisplayRevisionMarks w:val="false"/>
+            <w:RevisionView w:val="None"/>
+            <w:OriginalView w:val="None"/>
+            <w:DoNotTrackMoves/>
+            <w:DoNotTrackFormatting/>
+            <w:DoNotOptimizeForBrowser/>
+        </w:WordDocument>
+        <o:OfficeDocumentSettings>
+            <o:AllowPNG/>
+        </o:OfficeDocumentSettings>
+        <w:PageSetup>
+            <w:PageMargins w:top="1440" w:right="1800" w:bottom="1440" w:left="1800" w:header="720" w:footer="720" w:gutter="0"/>
+            <w:PgSzType w:val="A4"/>
+            <w:PgSz w:w="11906" w:h="16838"/>
+        </w:PageSetup>
+    </xml>
+    <![endif]-->
+    <style>
+        @page {
+            size: A4;
+            margin: 2.54cm 3.17cm;
+        }
+        body {
+            font-family: ${docFont}, sans-serif;
+            font-size: ${fontSizePt}pt;
+            line-height: 1.6;
+            margin: 0;
+            padding: 0 60pt; /* 左右各 60pt 内边距，确保不被截断 */
+        }
+        h1 { font-size: ${fontSizePt + 10}pt; font-weight: bold; margin: 20pt 0 10pt 0; }
+        h2 { font-size: ${fontSizePt + 8}pt; font-weight: bold; margin: 18pt 0 8pt 0; }
+        h3 { font-size: ${fontSizePt + 6}pt; font-weight: bold; margin: 16pt 0 6pt 0; }
+        h4 { font-size: ${fontSizePt + 4}pt; font-weight: bold; margin: 14pt 0 4pt 0; }
+        p { margin: 6pt 0; }
+        ul, ol { margin: 8pt 0; padding-left: 24pt; }
+        li { margin: 4pt 0; }
+        blockquote {
+            border-left: 3pt solid #1a73e8;
+            padding-left: 12pt;
+            margin: 10pt 0;
+            color: #666;
+            font-style: italic;
+        }
+        pre {
+            background-color: #f5f5f5;
+            padding: 10pt;
+            margin: 10pt 0;
+            font-family: Consolas, monospace;
+            font-size: ${fontSizePt - 1}pt;
+            overflow-x: auto;
+        }
+        code {
+            background-color: #f0f2f5;
+            padding: 2pt 4pt;
+            font-family: Consolas, monospace;
+            font-size: ${fontSizePt - 1}pt;
+        }
+        pre code {
+            background-color: transparent;
+            padding: 0;
+        }
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 10pt 0;
+        }
+        th, td {
+            border: 1pt solid #d0d7de;
+            padding: 6pt 10pt;
+            text-align: left;
+        }
+        th {
+            background-color: #f0f4f8;
+            font-weight: bold;
+        }
+        a {
+            color: #1a73e8;
+            text-decoration: underline;
+        }
+        hr {
+            border: none;
+            border-top: 1pt solid #ccc;
+            margin: 16pt 0;
+        }
+    </style>
+</head>
+<body>
+${htmlContent}
+</body>
+</html>`;
+
+            // 创建 Blob 并下载
+            var blob = new Blob([wordHtml], { type: 'application/msword;charset=utf-8' });
+            saveAs(blob, docTitle + '.doc');
+            showToast('Word 文档已导出: ' + docTitle + '.doc', 'success');
+
+        } catch (e) {
+            console.error('导出 Word 失败:', e);
+            showToast('导出失败: ' + e.message, 'error');
+        }
+    }
+
+    // ==================== 5. 示例模板 ====================
+
+    /**
+     * 加载示例模板
+     * 把一段预置的 Markdown 示例文本填入编辑区，方便用户快速体验
+     */
+    function loadTemplate() {
+        // 这段文本包含了常见的 Markdown 语法：标题、加粗、斜体、列表、表格、引用、代码块等
+        editor.value = '# 文档标题\n\n## 一、项目概述\n\n这是一个**示例文档**，展示了 Markdown 转 Word 工具的基本功能。\n\n### 1.1 功能特点\n\n- 支持标题、段落、列表等基础格式\n- 支持**加粗**、*斜体*、~~删除线~~等文字样式\n- 支持表格、引用块、代码块等高级格式\n\n## 二、表格示例\n\n| 功能 | 说明 | 状态 |\n|------|------|------|\n| Markdown 编辑 | 左侧编辑，右侧预览 | 已完成 |\n| 导出 Word | 转换为 .docx 文件 | 已完成 |\n| 复制功能 | 复制 Markdown 或 HTML | 已完成 |\n\n## 三、引用与代码\n\n> 这是一段引用文字，用于展示引用块的效果。\n> 可以包含多行内容。\n\n代码示例：\n\n```javascript\nfunction hello() {\n    console.log("Hello, World!");\n}\n```\n\n行内代码示例：使用 `console.log()` 输出日志。\n\n## 四、有序列表\n\n1. 第一步：打开工具\n2. 第二步：输入 Markdown 内容\n3. 第三步：点击导出 Word\n\n---\n\n*感谢使用 Markdown 转 Word 转换工具！*';
+        // 更新预览和字符数
+        updatePreview();
+        updateCharCount();
+        showToast('已加载基础结构示例模板', 'success');
+    }
+
+    /**
+     * 清空编辑区
+     * 如果编辑区有内容，会先弹窗确认，防止误操作
+     */
+    function clearEditor() {
+        if (editor.value && !confirm('确定要清空编辑区内容吗？')) return;
+        editor.value = '';
+        updatePreview();
+        updateCharCount();
+        showToast('编辑区已清空', 'info');
+    }
+
+    // ==================== 7. Toast 通知 ====================
+
+    /**
+     * 显示 Toast 提示消息
+     * 在页面右上角弹出一个短暂的提示，3 秒后自动消失
+     *
+     * @param {string} message - 提示消息的文字内容
+     * @param {string} type    - 消息类型：'success'（成功/绿色）、'error'（错误/红色）、'info'（信息/蓝色）
+     */
+    function showToast(message, type) {
+        type = type || 'info'; // 默认类型为 info
+        var container = document.getElementById('toastContainer');
+        // 创建一个 div 元素作为消息条
+        var toast = document.createElement('div');
+        toast.className = 'toast toast-' + type; // 根据类型设置不同的颜色
+        toast.textContent = message;
+        container.appendChild(toast); // 添加到页面中
+        // 3 秒后自动移除这条消息
+        setTimeout(function() {
+            if (toast.parentNode) toast.parentNode.removeChild(toast);
+        }, 3000);
+    }
+
+    // ==================== 8. 设置实时生效 ====================
+
+    // 当用户切换字体时，立即更新预览区的字体
+    document.getElementById('docFont').addEventListener('change', function() {
+        previewEl.style.fontFamily = this.value;
+        showToast('预览字体已切换为: ' + this.options[this.selectedIndex].text, 'info');
+    });
+
+    // 当用户切换字号时，立即更新预览区的字号
+    document.getElementById('docFontSize').addEventListener('change', function() {
+        // 字号值到 pt 的映射表（docx 中 24 = 12pt = 小四）
+        var map = { '20': '9pt', '21': '10.5pt', '24': '12pt', '28': '14pt', '32': '16pt', '36': '18pt', '44': '22pt' };
+        var pt = map[this.value] || '12pt';
+        previewEl.style.fontSize = pt;
+        showToast('预览字号已切换为: ' + pt, 'info');
+    });
+
+    // ==================== 9. 页面加载完成后初始化 ====================
+
+    // 首次渲染预览（如果编辑区有内容的话）
+    updatePreview();
+    // 首次显示字符数
+    updateCharCount();
+    </script>
+</body>
+</html>
